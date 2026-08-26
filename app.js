@@ -16,6 +16,8 @@ var BACKEND = null;
 var USER = null;
 var mounted = false;
 var pendingRender = false;
+var IMG_CACHE = {};     // productId -> [{id, data}]
+var IMG_LOADING = {};   // productId -> true while fetching
 
 function nowISO(){ return new Date().toISOString(); }
 function uid(p){ return (p||'x') + Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-3); }
@@ -136,7 +138,8 @@ var IC = {
   close:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 7 2.6a1.6 1.6 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 17 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V7a1.6 1.6 0 0 0 1.5 1H23a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>',
   warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 9v5M12 17v.01"/></svg>',
-  out:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>'
+  out:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>',
+  image:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'
 };
 
 /* =========================================================================
@@ -271,7 +274,93 @@ function viewProduct(id){
   var saCard = '<div class="card pad"><h3 class="sec-title">'+IC.cart+' ประวัติการขาย <span class="n">'+sa.length+' ครั้ง</span></h3>'+
     (sa.length? '<div class="tablewrap" style="border:none"><table><thead><tr><th>วันที่</th><th class="num">จำนวน</th><th class="num">ราคาขาย</th><th class="num">ทุน</th><th class="num">กำไร</th></tr></thead><tbody>'+
       sa.map(function(s){ var pf=s.qty*(s.price-s.cost); return '<tr><td>'+fmtDate(s.date)+'</td><td class="num tnum">'+num(s.qty)+'</td><td class="num tnum">'+money2(s.price)+'</td><td class="num tnum">'+money2(s.cost)+'</td><td class="num tnum money '+(pf>=0?'pos':'neg')+'">'+(pf>=0?'+':'')+money(pf)+'</td></tr>'; }).join('')+'</tbody></table></div>' : '<div class="empty" style="padding:20px">ยังไม่มีการขาย</div>')+'</div>';
-  return head+detail+'<div class="two-col" style="margin-top:14px">'+saCard+puCard+'</div><div style="margin-top:16px"><button class="btn danger sm" data-delete="'+p.id+'">'+IC.trash+'ลบสินค้านี้</button></div>';
+  return head+detail+galleryCard(p.id)+'<div class="two-col" style="margin-top:14px">'+saCard+puCard+'</div><div style="margin-top:16px"><button class="btn danger sm" data-delete="'+p.id+'">'+IC.trash+'ลบสินค้านี้</button></div>';
+}
+
+/* ---------- Product image gallery (stored free as data in Firestore) ---------- */
+function galleryCard(pid){
+  var imgs = IMG_CACHE[pid];
+  var body;
+  if(imgs===undefined){
+    loadImages(pid);
+    body = '<div class="empty" style="padding:20px;color:var(--ink-3)">กำลังโหลดรูป…</div>';
+  } else if(!imgs.length){
+    body = '<div class="empty" style="padding:22px">'+IC.image+'<div>ยังไม่มีรูปสินค้า</div><div style="font-size:12px;margin-top:2px">เพิ่มได้หลายรูป ระบบย่อขนาดให้อัตโนมัติ</div></div>';
+  } else {
+    body = '<div class="gallery">'+ imgs.map(function(im){
+      return '<div class="gal-item"><img src="'+im.data+'" alt="รูปสินค้า" data-lightbox="'+im.id+'"><button class="gal-del no-print" data-del-img="'+im.id+'" title="ลบรูป">'+IC.close+'</button></div>';
+    }).join('') +'</div>';
+  }
+  return '<div class="card pad" style="margin-top:14px"><h3 class="sec-title">'+IC.image+' รูปสินค้า'+(imgs&&imgs.length?' <span class="n">'+imgs.length+' รูป</span>':'')+
+    '<button class="btn primary sm no-print" data-add-img="'+pid+'" style="margin-left:auto">'+IC.plus+'เพิ่มรูป</button></h3>'+ body +'</div>';
+}
+function loadImages(pid){
+  if(IMG_LOADING[pid] || !BACKEND || !BACKEND.getImages) return;
+  IMG_LOADING[pid]=true;
+  BACKEND.getImages(pid).then(function(list){
+    IMG_CACHE[pid]=list||[]; IMG_LOADING[pid]=false;
+    if(ROUTE.view==='product' && ROUTE.id===pid && !document.getElementById('modalBg')) render();
+  }).catch(function(e){ console.error('getImages',e); IMG_CACHE[pid]=[]; IMG_LOADING[pid]=false;
+    if(ROUTE.view==='product' && ROUTE.id===pid) render(); });
+}
+/* Resize an image file to a compact JPEG data URL (keeps Firestore docs < 1MB, all free) */
+function resizeImage(file, maxDim, quality){
+  return new Promise(function(resolve, reject){
+    var reader=new FileReader();
+    reader.onerror=function(){ reject(new Error('read')); };
+    reader.onload=function(){
+      var img=new Image();
+      img.onerror=function(){ reject(new Error('decode')); };
+      img.onload=function(){
+        var w=img.width, h=img.height, scale=Math.min(1, maxDim/Math.max(w,h));
+        var cw=Math.round(w*scale), ch=Math.round(h*scale);
+        var c=document.createElement('canvas'); c.width=cw; c.height=ch;
+        var ctx=c.getContext('2d'); ctx.drawImage(img,0,0,cw,ch);
+        var q=quality;
+        var out=c.toDataURL('image/jpeg', q);
+        // step quality down if the encoded string is too large for a Firestore doc
+        while(out.length>820000 && q>0.4){ q-=0.1; out=c.toDataURL('image/jpeg', q); }
+        resolve(out);
+      };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function addImagesFlow(pid){
+  if(!BACKEND||!BACKEND.addImage){ toast('ยังไม่พร้อมอัปโหลดรูป','bad'); return; }
+  var inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.multiple=true;
+  inp.onchange=function(){
+    var files=Array.prototype.slice.call(inp.files||[]); if(!files.length) return;
+    files=files.filter(function(f){ return /^image\//.test(f.type); });
+    if(!files.length){ toast('เลือกได้เฉพาะไฟล์รูปภาพ','bad'); return; }
+    toast('กำลังเพิ่มรูป '+files.length+' รูป…');
+    setSync('saving');
+    var chain=Promise.resolve();
+    files.forEach(function(f){
+      chain=chain.then(function(){ return resizeImage(f,1280,0.72); }).then(function(data){ return BACKEND.addImage(pid, data); });
+    });
+    chain.then(function(){
+      delete IMG_CACHE[pid]; // force refetch
+      loadImages(pid); setSync();
+      toast('เพิ่มรูปแล้ว','good');
+    }).catch(function(e){ console.error('addImages',e); setSync(); toast('เพิ่มรูปไม่สำเร็จ','bad'); });
+  };
+  inp.click();
+}
+function deleteImageFlow(imageId, pid){
+  if(!BACKEND||!BACKEND.deleteImage) return;
+  setSync('saving');
+  BACKEND.deleteImage(imageId).then(function(){
+    delete IMG_CACHE[pid]; loadImages(pid); setSync(); toast('ลบรูปแล้ว','good');
+  }).catch(function(e){ console.error('delImg',e); setSync(); toast('ลบรูปไม่สำเร็จ','bad'); });
+}
+function lightbox(imageId, pid){
+  var list=IMG_CACHE[pid]||[]; var im=null; list.forEach(function(x){ if(x.id===imageId) im=x; }); if(!im) return;
+  var bg=document.createElement('div'); bg.className='lightbox'; bg.id='lightbox';
+  bg.innerHTML='<img src="'+im.data+'" alt="รูปสินค้า"><button class="lb-close">'+IC.close+'</button>';
+  bg.onclick=function(){ bg.remove(); };
+  document.body.appendChild(bg);
 }
 
 /* ---------- Sell ---------- */
@@ -475,8 +564,11 @@ function bind(){
   root.querySelectorAll('[data-backup]').forEach(function(b){ b.onclick=function(){ backupJSON(); }; });
   root.querySelectorAll('[data-import]').forEach(function(b){ b.onclick=function(){ importJSON(); }; });
   root.querySelectorAll('[data-signout]').forEach(function(b){ b.onclick=function(){ if(BACKEND&&BACKEND.signOut) BACKEND.signOut(); }; });
+  root.querySelectorAll('[data-add-img]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); addImagesFlow(b.getAttribute('data-add-img')); }; });
+  root.querySelectorAll('[data-del-img]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); deleteImageFlow(b.getAttribute('data-del-img'), ROUTE.id); }; });
+  root.querySelectorAll('[data-lightbox]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); lightbox(b.getAttribute('data-lightbox'), ROUTE.id); }; });
 
-  root.querySelectorAll('[data-delete]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var id=b.getAttribute('data-delete'); var p=productById(id); if(!p) return; confirmModal('ลบสินค้า “'+p.name+'”?','ประวัติซื้อ/ขายของสินค้านี้จะยังอยู่ในรายงาน แต่สินค้าจะถูกนำออกจากสต๊อก',function(){ commit(function(s){ s.products=s.products.filter(function(x){return x.id!==id;}); },{msg:'ลบสินค้าแล้ว',kind:'good'}); go('products'); }); }; });
+  root.querySelectorAll('[data-delete]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var id=b.getAttribute('data-delete'); var p=productById(id); if(!p) return; confirmModal('ลบสินค้า “'+p.name+'”?','ประวัติซื้อ/ขายของสินค้านี้จะยังอยู่ในรายงาน แต่สินค้าและรูปจะถูกนำออกจากสต๊อก',function(){ if(BACKEND&&BACKEND.deleteImagesFor){ BACKEND.deleteImagesFor(id).catch(function(){}); } delete IMG_CACHE[id]; commit(function(s){ s.products=s.products.filter(function(x){return x.id!==id;}); },{msg:'ลบสินค้าแล้ว',kind:'good'}); go('products'); }); }; });
   root.querySelectorAll('[data-del-sale]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var id=b.getAttribute('data-del-sale'); var s0=null; STATE.sales.forEach(function(x){if(x.id===id)s0=x;}); if(!s0) return; confirmModal('ลบรายการขายนี้?','สต๊อกจะถูกคืนกลับ '+s0.qty+' ชิ้น',function(){ commit(function(s){ var sale=null; s.sales.forEach(function(x){if(x.id===id)sale=x;}); if(sale){ var p=pin(s,sale.productId); if(p) p.qty+=sale.qty; s.sales=s.sales.filter(function(x){return x.id!==id;}); } },{msg:'ลบรายการขายแล้ว',kind:'good'}); }); }; });
   root.querySelectorAll('[data-del-exp]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var id=b.getAttribute('data-del-exp'); commit(function(s){ s.expenses=s.expenses.filter(function(x){return x.id!==id;}); },{msg:'ลบค่าใช้จ่ายแล้ว',kind:'good'}); }; });
 

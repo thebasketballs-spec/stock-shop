@@ -2,19 +2,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ---- ร้านเสื้อผ้า: เอกสารสต๊อก ----
-    // อนุญาตเฉพาะอีเมลในลิสต์นี้เท่านั้นที่อ่าน/แก้ไขได้
-    // เพิ่มอีเมลคนในร้านได้ โดยใส่ต่อในวงเล็บ [] คั่นด้วยเครื่องหมายจุลภาค
+    // อนุญาตเฉพาะอีเมลในลิสต์นี้ (เพิ่มอีเมลคนในร้านได้ คั่นด้วยจุลภาค)
+    // ข้อมูลสต๊อก
     match /shops/{shopId} {
       allow read, write: if request.auth != null
-        && request.auth.token.email in [
-          "the_basketballs@hotmail.com"
-        ];
+        && request.auth.token.email in ["the_basketballs@hotmail.com"];
     }
-
-    // ปฏิเสธ path อื่นทั้งหมด (ไม่กระทบแอปอื่น เพราะไม่ได้ใช้ Firestore)
-    match /{document=**} {
-      allow read, write: if false;
+    // รูปสินค้า (เก็บเป็นข้อมูลรูปแบบฟรีใน Firestore)
+    match /product_images/{imgId} {
+      allow read, write: if request.auth != null
+        && request.auth.token.email in ["the_basketballs@hotmail.com"];
     }
   }
 }

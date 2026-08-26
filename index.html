@@ -50,7 +50,8 @@
   import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup,
            signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut }
     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import { getFirestore, doc, onSnapshot, runTransaction }
+  import { getFirestore, doc, onSnapshot, runTransaction,
+           collection, addDoc, deleteDoc, getDocs, query, where }
     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { firebaseConfig, SHOP_ID } from "./config.js";
 
@@ -73,6 +74,7 @@
   const auth = getAuth(app);
   const db = getFirestore(app);
   const shopRef = doc(db, "shops", (SHOP_ID||"main"));
+  const imagesCol = collection(db, "product_images");
 
   function showLogin(){ gate.style.display="flex"; root.style.display="none"; gateSub.textContent="เข้าสู่ระบบเพื่อจัดการสต๊อกร้าน"; loginBox.style.display="block"; }
   function showApp(){ gate.style.display="none"; root.style.display="block"; if(!root.innerHTML) root.innerHTML='<div class="gate" style="min-height:60vh"><div class="gate-card"><div class="gate-logo">👕</div><p class="gate-sub">กำลังโหลดข้อมูล…</p></div></div>'; }
@@ -112,7 +114,16 @@
           data.meta=data.meta||{}; data.meta.updatedAt=new Date().toISOString();
           tx.set(shopRef, data);
         }),
-        signOut:()=> signOut(auth)
+        signOut:()=> signOut(auth),
+        getImages:(productId)=> getDocs(query(imagesCol, where("productId","==",productId))).then((snap)=>{
+          const arr=[]; snap.forEach((d)=>{ const v=d.data(); arr.push({id:d.id, data:v.data, createdAt:v.createdAt||0}); });
+          arr.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)); return arr;
+        }),
+        addImage:(productId, data)=> addDoc(imagesCol, {productId:productId, data:data, createdAt:Date.now(), by:(user.email||"")}),
+        deleteImage:(imageId)=> deleteDoc(doc(db,"product_images",imageId)),
+        deleteImagesFor:(productId)=> getDocs(query(imagesCol, where("productId","==",productId))).then((snap)=>{
+          const ps=[]; snap.forEach((d)=> ps.push(deleteDoc(d.ref))); return Promise.all(ps);
+        })
       };
       StockApp.setBackend(backend);
       StockApp.mount();
