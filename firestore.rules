@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- ร้านเสื้อผ้า: เอกสารสต๊อก ----
+    // อนุญาตเฉพาะอีเมลในลิสต์นี้เท่านั้นที่อ่าน/แก้ไขได้
+    // เพิ่มอีเมลคนในร้านได้ โดยใส่ต่อในวงเล็บ [] คั่นด้วยเครื่องหมายจุลภาค
+    match /shops/{shopId} {
+      allow read, write: if request.auth != null
+        && request.auth.token.email in [
+          "the_basketballs@hotmail.com"
+        ];
+    }
+
+    // ปฏิเสธ path อื่นทั้งหมด (ไม่กระทบแอปอื่น เพราะไม่ได้ใช้ Firestore)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

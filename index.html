@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+<title>สต๊อกร้านเสื้อผ้า</title>
+<meta name="description" content="ระบบจัดการสต๊อกเสื้อผ้า ต้นทุนเฉลี่ย และกำไร-ขาดทุน">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👕</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Loading / auth gate -->
+<div id="gate" class="gate">
+  <div class="gate-card">
+    <div class="gate-logo">👕</div>
+    <h1 class="gate-title">สต๊อกร้านเสื้อผ้า</h1>
+    <p class="gate-sub" id="gateSub">กำลังเชื่อมต่อ…</p>
+
+    <div id="loginBox" style="display:none">
+      <button class="btn gbtn" id="googleBtn">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z"/></svg>
+        เข้าสู่ระบบด้วย Google
+      </button>
+      <div class="or"><span>หรือใช้อีเมล</span></div>
+      <div class="login-form">
+        <input id="email" type="email" placeholder="อีเมล" autocomplete="username">
+        <input id="pass" type="password" placeholder="รหัสผ่าน" autocomplete="current-password">
+        <div class="login-actions">
+          <button class="btn primary" id="signinBtn">เข้าสู่ระบบ</button>
+          <button class="btn ghost" id="registerBtn">สมัครใหม่</button>
+        </div>
+      </div>
+      <p class="gate-err" id="gateErr"></p>
+    </div>
+  </div>
+  <p class="gate-foot">ข้อมูลถูกเก็บอย่างปลอดภัยบน Firebase • เข้าถึงได้เฉพาะผู้ที่ได้รับอนุญาต</p>
+</div>
+
+<!-- App -->
+<div id="root" style="display:none"></div>
+
+<script src="qrcode.js"></script>
+<script src="app.js"></script>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup,
+           signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getFirestore, doc, onSnapshot, runTransaction }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { firebaseConfig, SHOP_ID } from "./config.js";
+
+  const gate=document.getElementById('gate'), root=document.getElementById('root');
+  const gateSub=document.getElementById('gateSub'), loginBox=document.getElementById('loginBox'), gateErr=document.getElementById('gateErr');
+
+  function notConfigured(){
+    const k = firebaseConfig && firebaseConfig.apiKey || "";
+    return !k || k.indexOf("PASTE_")===0 || k==="YOUR_API_KEY";
+  }
+  if(notConfigured()){
+    gateSub.textContent="ยังไม่ได้ตั้งค่า Firebase";
+    gateErr.style.display="block";
+    gateErr.textContent="เปิดไฟล์ config.js แล้ววาง Firebase config ของร้านลงไปก่อนใช้งาน (ดูวิธีในไฟล์ README.md)";
+    loginBox.style.display="none";
+    throw new Error("Firebase not configured");
+  }
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const shopRef = doc(db, "shops", (SHOP_ID||"main"));
+
+  function showLogin(){ gate.style.display="flex"; root.style.display="none"; gateSub.textContent="เข้าสู่ระบบเพื่อจัดการสต๊อกร้าน"; loginBox.style.display="block"; }
+  function showApp(){ gate.style.display="none"; root.style.display="block"; if(!root.innerHTML) root.innerHTML='<div class="gate" style="min-height:60vh"><div class="gate-card"><div class="gate-logo">👕</div><p class="gate-sub">กำลังโหลดข้อมูล…</p></div></div>'; }
+
+  function errText(code){
+    const m={
+      'auth/invalid-credential':'อีเมลหรือรหัสผ่านไม่ถูกต้อง',
+      'auth/wrong-password':'รหัสผ่านไม่ถูกต้อง',
+      'auth/user-not-found':'ไม่พบบัญชีนี้ ลองสมัครใหม่',
+      'auth/email-already-in-use':'อีเมลนี้มีบัญชีอยู่แล้ว ลองเข้าสู่ระบบ',
+      'auth/weak-password':'รหัสผ่านสั้นเกินไป (อย่างน้อย 6 ตัว)',
+      'auth/invalid-email':'รูปแบบอีเมลไม่ถูกต้อง',
+      'auth/popup-closed-by-user':'ปิดหน้าต่างล็อกอินก่อนเสร็จ',
+      'auth/unauthorized-domain':'โดเมนนี้ยังไม่ได้อนุญาตใน Firebase (เพิ่มใน Authentication → Settings → Authorized domains)'
+    };
+    return m[code] || ('เกิดข้อผิดพลาด: '+code);
+  }
+  function showErr(e){ gateErr.style.display="block"; gateErr.textContent=errText(e&&e.code||(''+e)); }
+  function clearErr(){ gateErr.style.display="none"; gateErr.textContent=""; }
+
+  document.getElementById('googleBtn').onclick=()=>{ clearErr(); signInWithPopup(auth,new GoogleAuthProvider()).catch(showErr); };
+  document.getElementById('signinBtn').onclick=()=>{ clearErr(); const e=email.value.trim(), p=pass.value; if(!e||!p){showErr({code:'auth/invalid-email'});return;} signInWithEmailAndPassword(auth,e,p).catch(showErr); };
+  document.getElementById('registerBtn').onclick=()=>{ clearErr(); const e=email.value.trim(), p=pass.value; if(!e||!p){showErr({code:'auth/invalid-email'});return;} createUserWithEmailAndPassword(auth,e,p).catch(showErr); };
+  document.getElementById('pass').addEventListener('keydown',ev=>{ if(ev.key==='Enter') document.getElementById('signinBtn').click(); });
+
+  let unsub=null;
+  onAuthStateChanged(auth, user=>{
+    clearErr();
+    if(user){
+      showApp();
+      const backend={
+        user:{ displayName:user.displayName, email:user.email, photoURL:user.photoURL },
+        commit:(mutateFn)=> runTransaction(db, async(tx)=>{
+          const snap=await tx.get(shopRef);
+          let data = snap.exists()? snap.data() : { meta:{shopName:'ร้านเสื้อผ้าที่บ้าน',currency:'฿',lowStock:3,categories:['เสื้อยืด','เสื้อเชิ้ต','กางเกงขายาว','กางเกงขาสั้น','กระโปรง','เดรส','อื่นๆ'],locations:['ชั้น A','ชั้น B','กล่อง 1','กล่อง 2','ตู้หน้าร้าน']}, products:[],purchases:[],sales:[],expenses:[] };
+          mutateFn(data);
+          data.meta=data.meta||{}; data.meta.updatedAt=new Date().toISOString();
+          tx.set(shopRef, data);
+        }),
+        signOut:()=> signOut(auth)
+      };
+      StockApp.setBackend(backend);
+      StockApp.mount();
+      if(unsub) unsub();
+      unsub = onSnapshot(shopRef, (snap)=>{ StockApp.onData(snap.exists()? snap.data() : null); },
+        (err)=>{ console.error('snapshot error',err); showApp(); root.innerHTML='<div class="gate" style="min-height:60vh"><div class="gate-card"><div class="gate-logo">⚠️</div><p class="gate-sub">อ่านข้อมูลไม่ได้: '+(err.code||err.message)+'</p><p style="font-size:13px;color:var(--ink-3)">ตรวจสอบ Firestore Rules และอีเมลที่อนุญาต</p></div></div>'; });
+    } else {
+      if(unsub){ unsub(); unsub=null; }
+      showLogin();
+    }
+  });
+</script>
+</body>
+</html>
