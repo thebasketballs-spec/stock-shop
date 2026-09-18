@@ -271,6 +271,7 @@ function viewProduct(id){
     '<div><dl class="spec">'+
       '<dt>คงเหลือ</dt><dd>'+stockChip(p.qty)+'</dd>'+
       '<dt>ที่เก็บ</dt><dd>'+locTag(p.location)+'</dd>'+
+      (p.price!=null? '<dt>ราคาขาย/ชิ้น</dt><dd class="tnum">'+money2(p.price)+(p.avgCost>0?' <span style="font-size:12px;color:var(--ink-3)">(กำไร/ชิ้น '+(p.price-p.avgCost>=0?'+':'')+money2(p.price-p.avgCost)+')</span>':'')+'</dd>' : '')+
       '<dt>ต้นทุนเฉลี่ย/ชิ้น</dt><dd class="tnum">'+money2(p.avgCost)+'</dd>'+
       '<dt>มูลค่าคงเหลือ</dt><dd class="tnum">'+money(p.qty*p.avgCost)+'</dd>'+
       '<dt>ขายไปแล้ว</dt><dd class="tnum">'+num(soldQty)+' ชิ้น</dd>'+
@@ -467,17 +468,18 @@ function addProductModal(existing){
     '<div class="form-row"><label>ไซส์</label><input id="f-size" value="'+esc(p.size||'')+'" placeholder="S / M / L / 32"></div>'+
     '<div class="form-row"><label>สี</label><input id="f-color" value="'+esc(p.color||'')+'" placeholder="เช่น ขาว"></div>'+
     '<div class="form-row full"><label>ที่เก็บของ</label><input id="f-loc" list="locs" value="'+esc(p.location||'')+'" placeholder="เช่น ชั้น A / กล่อง 1">'+locDatalist()+'</div>'+
-    (existing? '<div class="form-row"><label>คงเหลือ (ปรับมือ)</label><input id="f-qty" type="number" value="'+esc(p.qty)+'"></div><div class="form-row"><label>ต้นทุนเฉลี่ย/ชิ้น</label><input id="f-cost" type="number" min="0" step="0.01" value="'+esc(p.avgCost)+'"></div>'
-             : '<div class="form-row"><label>จำนวนเริ่มต้น</label><input id="f-qty" type="number" min="0" value="0"></div><div class="form-row"><label>ต้นทุน/ชิ้น</label><input id="f-cost" type="number" min="0" step="0.01" value="0"></div>')+
+    (existing? '<div class="form-row"><label>คงเหลือ (ปรับมือ)</label><input id="f-qty" type="number" value="'+esc(p.qty)+'"></div><div class="form-row"><label>ราคาขาย/ชิ้น</label><input id="f-price" type="number" min="0" step="0.01" value="'+esc(p.price!=null?p.price:'')+'" placeholder="เช่น 199"></div><div class="form-row"><label>ต้นทุนเฉลี่ย/ชิ้น</label><input id="f-cost" type="number" min="0" step="0.01" value="'+esc(p.avgCost)+'"></div>'
+             : '<div class="form-row"><label>จำนวนเริ่มต้น</label><input id="f-qty" type="number" min="0" value="0"></div><div class="form-row"><label>ราคาขาย/ชิ้น</label><input id="f-price" type="number" min="0" step="0.01" value="" placeholder="เช่น 199"></div><div class="form-row"><label>ต้นทุน/ชิ้น</label><input id="f-cost" type="number" min="0" step="0.01" value="0"></div>')+
     '</div>';
   openModal(existing?'แก้ไขสินค้า':'เพิ่มสินค้าใหม่', body, '<button class="btn ghost" data-close="1">ยกเลิก</button><button class="btn primary" id="saveProd">บันทึก</button>');
   document.getElementById('saveProd').onclick=function(){
     var name=val('f-name'); if(!name){ toast('กรุณาใส่ชื่อสินค้า','bad'); return; }
     var sku=val('f-sku'), cat=val('f-cat'), size=val('f-size'), color=val('f-color'), loc=val('f-loc'), qty=fval('f-qty'), cost=fval('f-cost');
+    var priceRaw=val('f-price'), price=(priceRaw===''?null:fval('f-price'));
     if(existing){
-      commit(function(s){ var p2=pin(s,existing.id); if(!p2) return; p2.name=name; p2.sku=sku||p2.sku; p2.category=cat; p2.size=size; p2.color=color; p2.location=loc; p2.qty=qty; p2.avgCost=cost; rememberLoc(s,loc); rememberCat(s,cat); },{msg:'บันทึกการแก้ไขแล้ว',kind:'good'});
+      commit(function(s){ var p2=pin(s,existing.id); if(!p2) return; p2.name=name; p2.sku=sku||p2.sku; p2.category=cat; p2.size=size; p2.color=color; p2.location=loc; p2.qty=qty; p2.avgCost=cost; p2.price=price; rememberLoc(s,loc); rememberCat(s,cat); },{msg:'บันทึกการแก้ไขแล้ว',kind:'good'});
     } else {
-      commit(function(s){ var id=uid('p'); s.products.push({id:id,sku:sku||genSku(s,cat),name:name,category:cat,size:size,color:color,location:loc,qty:0,avgCost:0,createdAt:nowISO()}); if(qty>0) applyReceive(s,id,qty,cost,0,'ยอดยกมา'); rememberLoc(s,loc); rememberCat(s,cat); },{msg:'เพิ่มสินค้าแล้ว',kind:'good'});
+      commit(function(s){ var id=uid('p'); s.products.push({id:id,sku:sku||genSku(s,cat),name:name,category:cat,size:size,color:color,location:loc,qty:0,avgCost:0,price:price,createdAt:nowISO()}); if(qty>0) applyReceive(s,id,qty,cost,0,'ยอดยกมา'); rememberLoc(s,loc); rememberCat(s,cat); },{msg:'เพิ่มสินค้าแล้ว',kind:'good'});
     }
     closeModal();
   };
@@ -529,6 +531,9 @@ function sellModal(preId){
   openModal('คีย์ขาย', body, '<button class="btn ghost" data-close="1">ยกเลิก</button><button class="btn primary" id="saveSale">บันทึกการขาย</button>');
   function recalc(){ var p=productById(val('s-prod')); if(!p) return; var qty=fval('s-qty'), price=fval('s-price'); var cost=p.avgCost*qty, rev=price*qty, pf=rev-cost; var over=qty>p.qty;
     document.getElementById('s-calc').innerHTML='<div class="calc-line"><span>ต้นทุนเฉลี่ย ('+num(qty)+' × '+money2(p.avgCost)+')</span><span class="tnum">'+money2(cost)+'</span></div><div class="calc-line"><span>ยอดขาย</span><span class="tnum">'+money2(rev)+'</span></div><div class="calc-line total"><span>'+(pf>=0?'กำไร':'ขาดทุน')+'</span><span class="tnum money '+(pf>=0?'pos':'neg')+'">'+(pf>=0?'+':'')+money2(pf)+'</span></div>'+(over?'<div style="color:var(--bad);font-size:12.5px;margin-top:6px">⚠️ ขายมากกว่าที่มีในสต๊อก (เหลือ '+num(p.qty)+') — บันทึกได้ แต่สต๊อกจะติดลบ</div>':''); }
+  function fillPrice(){ var p=productById(val('s-prod')); var pe=document.getElementById('s-price'); if(p && p.price!=null && pe && pe.value===''){ pe.value=p.price; } }
+  var sp=document.getElementById('s-prod'); if(sp){ sp.addEventListener('change',function(){ fillPrice(); recalc(); }); }
+  fillPrice();
   ['s-prod','s-qty','s-price'].forEach(function(id){ var e=document.getElementById(id); if(e){ e.addEventListener('input',recalc); e.addEventListener('change',recalc);} }); recalc();
   document.getElementById('saveSale').onclick=function(){ var pid=val('s-prod'), qty=fval('s-qty'), price=fval('s-price'); if(qty<=0){ toast('ใส่จำนวนให้ถูกต้อง','bad'); return; } commit(function(s){ applySale(s,pid,qty,price,val('s-note')); },{msg:'บันทึกการขายแล้ว',kind:'good'}); closeModal(); };
 }
